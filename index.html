@@ -4,17 +4,39 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LA_COVID19_Cases</title>
-
+    
+    <!-- Load the Chart.js library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.8.0/Chart.min.js"></script>
+    
     <link rel="stylesheet" href="https://js.arcgis.com/4.15/esri/css/main.css">
     <script src="https://js.arcgis.com/4.15/"></script>
 
     <style>
-        html,body,#myviewDiv {
+        html,body{
             padding: 0;
             margin: 0;
             height: 100%;
             width: 100%;
+            overflow: hidden;
         }
+
+        #myviewDiv{
+            position: absolute;
+            left: 0;
+            right: 20%;
+            top: 0;
+            bottom: 0;
+            height: 100%;
+        }
+
+        #panel {
+            position: absolute;
+            right: 0;
+            height: 100%;
+            width: 20%;
+            overflow: scroll;
+      }
+
     </style>
     <script>
         let mymap; 
@@ -24,6 +46,11 @@
         let mapLegend;
         let mapExpand;
         let highlightSelected;
+        let highlightSelected2;
+        let sviChart;
+        let statsResults;
+        let results;
+        let resultsData;
 
         require(["esri/Map",
         "esri/views/MapView",
@@ -32,13 +59,14 @@
         "esri/widgets/Expand",
         "esri/widgets/Legend",
         "esri/Graphic",
-        "esri/layers/GraphicsLayer"],
-        function(Map,MapView,EsriFL,myRequest,Expand,Legend,Graphic,GraphicsLayer){
+        "esri/layers/GraphicsLayer",
+        "esri/tasks/support/Query",
+        "esri/core/watchUtils"],
+        function(Map,MapView,EsriFL,myRequest,Expand,Legend,Graphic,GraphicsLayer,Query,watchUtils){
             mymap = new Map({
                 basemap:"dark-gray-vector"
             });
             
-
             mymapView = new MapView({
                 center: [-118.24097332504088,34.19092976687072],
                 map: mymap,
@@ -55,15 +83,11 @@
                 content:mapLegend,
                 expandTooltip: "Legend"
             });
-            mymapView.ui.add(mapExpand, "bottom-left");
-            // let covidCases = new EsriFL({
-            //     url:"https://services7.arcgis.com/aFfS9FqkIRSo0Ceu/ArcGIS/rest/services/COVID19_LADPH_Daily_Deaths_LA_County_Cities_Communities/FeatureServer/0",
-            // });
-            // mymap.add(covidCases);
+            mymapView.ui.add(mapExpand, "bottom-left");;
 
             let cdc_svi = new EsriFL({
                 url: "https://services7.arcgis.com/aFfS9FqkIRSo0Ceu/ArcGIS/rest/services/COVID19_Cases_LA_County_Cities_Communities_and_Social_Vulnerability_Index_Relationship/FeatureServer/1",
-                definitionExpression: "Estimated_Population <> null",
+                definitionExpression: "Estimated_Population <> NULL",
                 popupTemplate: {
                     title:"{Name}",
                     content:[{
@@ -135,72 +159,252 @@
                 }
             });
 
-            mymapView.on("click",function(event){
-                //console.log(event)
-                // alert("lon, lat: ["+event.mapPoint.longitude+", "
-                //                 +event.mapPoint.latitude+"]")
+            mymapView.when().then(function(){
+                createChart();
+                //console.log(sviChart.data.datasets[0].data);
+                mymapView.whenLayerView(cdc_svi).then(function(layerView){
+                    watchUtils.whenFalseOnce(layerView,"updating",function(){
+                        mymapView.on(["click"],function(event){
+                            
+                            mymapView.graphics.remove(pointGraphic);
+                            updateChart(sviChart,[0,0,0,0,0]);
+                            queryFeatures_click(event);
+                });
+                    });
+                });
 
-                mymapView.graphics.remove(pointGraphic);
 
-                queryFeatures_click(event);
+                
             });
+            
 
             function queryFeatures_click(screenPoint){
+                //console.log(screenPoint);
                 const mypoint = mymapView.toMap(screenPoint);
-
+                //console.log(mypoint);
                 //Feature layer has a method queryFeatures(), which executes a Query against the feature service and returns a FeatureSet, 
                 //The returned FeatureSet can be accessed using the .then() method once the promise resolves
                 //A FeatureSet contains an array of Graphic features, which can be displayed in a Graphic layer
                 //two arguments for queryFeatures function:query and option
                 //https://developers.arcgis.com/javascript/latest/api-reference/esri-layers-FeatureLayer.html#queryFeatures
-                // cdc_svi.queryFeatures({
-                //     //query argument
-                //     //spatial query
-                //     geometry: mypoint,
-                //     distance: 1,
-                //     units: "miles",
-                //     spatialRelationship:"intersects",
-                //     outFields: ["*"]
-                // }).then(function(returnedFeatureSet){
-                //     //console.log(typeof returnedFeatureSet.features);
 
-                //     pointGraphic.geometry = mypoint;
-                //     mymapView.graphics.add(pointGraphic);
-                //     // mymapView.popup.open({
-                //     //     location:mypoint,
-                //     //     features: returnedFeatureSet.features,
-                //     //     featureMenuOpen: true
-                //     // });
-
-                //     //highlight the selected polygons
-                    
-                //     //var feature = returnedFeatureSet.features[0];
-                //     mymapView.whenLayerView(cdc_svi).then(function(layerView){
-                //         if (highlightSelected){highlightSelected.remove();}
-                //         highlightSelected = layerView.highlight(returnedFeatureSet.features);
-                //     });
-                // });
-
-                testingCtr.queryFeatures({
+                let myquery = new Query({
                     geometry:mypoint,
-                    distance:1,
+                    distance:2,
                     units:"miles",
                     spatialRelationship:"intersects",
-                    outFields:["*"]
-                }).then(function(returnedFeatureSet){
+                    outFields:["*"],
+                    returnGeometry:true
+                });
+
+                //query testing centers within 2 miles buffer of the clicking point
+                //highlight the selected testing centers
+                testingCtr.queryFeatures(myquery).then(function(returnedFeatureSet){
+                    //console.log(returnedFeatureSet.features[0].attributes);
                     pointGraphic.geometry = mypoint;
                     mymapView.graphics.add(pointGraphic);
                     mymapView.whenLayerView(testingCtr).then(function(layerView){
+                        //console.log(layerView);
+                        //console.log(testingCtr);
                         if (highlightSelected){highlightSelected.remove();}
                         highlightSelected = layerView.highlight(returnedFeatureSet.features);
                     });
+                });
+
+                //perform a statistical query on the SVI values of the cities/communities within 2 mile buffer of the clicking point
+                let avgOverallSVI = {
+                    onStatisticField: "AVG_CDC_SVI_Score",
+                    outStatisticFieldName:"Avg_SVI_Overall",
+                    statisticType: "avg"
+                };
+                let avgSocialEconSVI = {
+                    onStatisticField: "Avg_Socioeconomic_Percentile",
+                    outStatisticFieldName:"Avg_SVI_SocialEcon",
+                    statisticType: "avg"
+                };
+                let avgDisabilitySVI = {
+                    onStatisticField: "Avg_Housing_Composition_Disability_Percentile",
+                    outStatisticFieldName:"Avg_SVI_Disability",
+                    statisticType: "avg"
+                };
+                let avgMinoritySVI = {
+                    onStatisticField: "Avg_Minority_Status_Language_Percentile",
+                    outStatisticFieldName:"Avg_SVI_Minority",
+                    statisticType: "avg"
+                };
+                let avgTransporationSVI = {
+                    onStatisticField: "Avg_Housing_Transportation_Percentile",
+                    outStatisticFieldName:"Avg_SVI_Transporation",
+                    statisticType: "avg"
+                };
+                let totalPop = {
+                    onStatisticField:"Estimated_Population",
+                    outStatisticFieldName: "Total_Popualtion",
+                    statisticType: "sum"
+                };
+                let totalConfirmed = {
+                    onStatisticField:"Confirmed_Cases",
+                    outStatisticFieldName: "Total_Confirmed",
+                    statisticType: "sum"
+                }
+                let totalDeath = {
+                    onStatisticField:"Confirmed_Deaths",
+                    outStatisticFieldName: "Total_Confirmed_Deaths",
+                    statisticType: "sum"
+                }
+                
+                let statsQuery_svi_cases = new Query({
+                    outStatistics:[avgOverallSVI, avgSocialEconSVI, avgMinoritySVI, 
+                                    avgDisabilitySVI, avgTransporationSVI],
+                    where:"Estimated_Population <> null",
+                    geometry:mypoint,
+                    distance:2,
+                    units:"miles",
+                    spatialRelationship:"intersects",
+                    outFields:["*"],
+                    returnGeometry:true
+                });
+
+                //spatial query to highlight the cities/communities within 2mi buffer of the click
+                cdc_svi.queryFeatures(myquery).then(function(response){
+                    mymapView.whenLayerView(cdc_svi).then(function(layerView2){
+                        if (highlightSelected2) {highlightSelected2.remove();}
+                        highlightSelected2 = layerView2.highlight(response.features);
+                    });
                 })
 
+                //statistical query to calcuate statistics
+                cdc_svi.queryFeatures(statsQuery_svi_cases).then(function(response){
+                    console.log(response.features[0]);
+                    const results = response.features[0].attributes;
+                    
+
+                    resultsData = [results.Avg_SVI_Overall,
+                                    results.Avg_SVI_SocialEcon,
+                                    results.Avg_SVI_Minority,
+                                    results.Avg_SVI_Disability,
+                                    results.Avg_SVI_Transporation];
+                    updateChart(sviChart,resultsData);
+                    //console.log(resultsData);
+                    //return resultsData;
+                });
+
+                // updateChart(sviChart,statsResults);
+                // console.log(sviChart.data.datasets[0].data);
             }
+            
+            function createChart(){
+                const svichartCanvas = document.getElementById("svi-chart");
+                let chartData = {
+                    labels: ['Overall','Socioeconomic','Disability','Minority','Transporation'],
+                    datasets:[
+                        {
+                            label:"set1",
+                            backgroundColor: ["#FF5733","#FF5733","#FF5733","#FF5733","#FF5733"],
+                            stack: "Stack 0",
+                            data: [0,0,0,0,0]
+                        },
+                        // {
+                        //     label:"set2",
+                        //     backgroundColor: ["#7BA85D","#7BA85D","#7BA85D","#7BA85D","#7BA85D"],
+                        //     stack: "Stack 1",
+                        //     data: [0.5,0.4,0.2,0.1,0.6]
+                        // },
+                        // {
+                        //     label:"set2",
+                        //     backgroundColor: ["#5D98A8","#5D98A8","#5D98A8","#5D98A8","#5D98A8"],
+                        //     stack: "Stack 2",
+                        //     data: [0.5,0.4,0.2,0.1,0.6]
+                        // }
+                    ],
+                };
+                let chartOptions = 
+                {
+                    responsive: false,
+                    legend: {display: false},
+                    title: {
+                        display: true,
+                        text: "SVI"
+                    },
+                    scales: {
+                        xAxes: [
+                            {
+                                stacked: true,
+                                ticks: {
+                                    beginAtZero: true,
+                                    precision: 0
+                                }
+                            }
+                        ],
+                        yAxes: [
+                            {
+                                stacked: true,
+                                ticks: {
+                                    min: 0,
+                                    max: 1
+                                }
+                                
+                                
+                            }
+                        ]
+                    }
+                };
+
+                sviChart = new Chart(svichartCanvas.getContext("2d"),
+                {
+                    type:"bar",
+                    data:chartData,
+                    options:chartOptions
+                });
+            }
+
+            function updateChart(chart, dataValues){
+                chart.data.datasets[0].data = dataValues;
+                chart.update();
+            }
+
+            // let myAttributeQuery = new Query({
+            //         //attribute query
+            //         where: "Confirmed_Cases > 100",
+            //         outFields: ["*"]
+            //     });
+
+            //query for the sum of the population in all citis/communities (StatisticDefinition)
+            // let sumPopulation = {
+            //         onStatisticField: "Estimated_Population", // service field for population
+            //         outStatisticFieldName: "Pop_2015_sum",
+            //         statisticType: "sum"
+            //     };
+            //query for the average of crude rate (per 10K) in all citis/communities (StatisticDefinition)
+            // let avgCrudeRate = {
+            //         onStatisticField:"Crude_Rate_Per_100000",
+            //         outStatisticFieldName:"Avg_CrudeRate_Per100K",
+            //         statisticType: "avg"
+            //     }
+            // let myStatsQuery = new Query({
+            //         outStatistics:[sumPopulation,avgCrudeRate],
+            //         where:"Estimated_Population <> null",
+            //         geometry: mypoint,
+            //         distance: 1,
+            //         units: "miles",
+            //         spatialRelationship: "within"
+            //     });
+            // let myStatsQuery2 = cdc_svi.createQuery();
+            // myStatsQuery2.outStatistics = [sumPopulation,avgCrudeRate];
+            // cdc_svi.queryFeatures(myStatsQuery2).then(function(response){
+            //     console.log(response.features);
+            // });
+
         });
     </script>
 </head>
 <body>
     <div id="myviewDiv"></div>
+    <div id="panel">
+        <div style="padding: 15px;">
+            <canvas id="svi-chart" height="250" width="250"></canvas>
+        </div>
+        
+    </div>
 </body>
 </html>
