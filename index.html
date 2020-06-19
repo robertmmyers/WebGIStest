@@ -3,125 +3,204 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hello, Los Angeles</title>
+    <title>LA_COVID19_Cases</title>
+
     <link rel="stylesheet" href="https://js.arcgis.com/4.15/esri/css/main.css">
     <script src="https://js.arcgis.com/4.15/"></script>
+
     <style>
-        html, body, #viewDiv {
-          padding: 0;
-          margin: 0;
-          height: 100%;
-          width: 100%;
+        html,body,#myviewDiv {
+            padding: 0;
+            margin: 0;
+            height: 100%;
+            width: 100%;
         }
-      </style>
-</head>
-<body>
-    <div id="viewDiv"></div>
+    </style>
     <script>
-        require(["esri/views/MapView",
-                 "esri/Map",
-                 "esri/layers/FeatureLayer",
-                 ],
-            function(MPV,MAP,FeatureLayer){
-            let mymap = new MAP ({
-                basemap:"topo-vector",
-            });
-            let mymapview = new MPV({
-                container:"viewDiv",
-                map:mymap,
-                center: [-118.3263371,34.09042],
-                zoom:11
-            });
-            let mylayer = new FeatureLayer({
-                url:"https://services3.arcgis.com/ZvidGQkLaDJxRSJ2/ArcGIS/rest/services/CDC_Social_Vulnerability_Index_2018/FeatureServer/5",
-            });
-            let mylayer2 = new FeatureLayer({
-                url:"https://services3.arcgis.com/ZvidGQkLaDJxRSJ2/ArcGIS/rest/services/CDC_Social_Vulnerability_Index_2018/FeatureServer/7"
+        let mymap; 
+        let mymapView;
+        let covidCases;
+        let cdc_svi;
+        let mapLegend;
+        let mapExpand;
+        let highlightSelected;
+
+        require(["esri/Map",
+        "esri/views/MapView",
+        "esri/layers/FeatureLayer",
+        "esri/request",
+        "esri/widgets/Expand",
+        "esri/widgets/Legend",
+        "esri/Graphic",
+        "esri/layers/GraphicsLayer"],
+        function(Map,MapView,EsriFL,myRequest,Expand,Legend,Graphic,GraphicsLayer){
+            mymap = new Map({
+                basemap:"dark-gray-vector"
             });
             
-            const closedParkSymbl = {
-                //color: [255,0,0,255],
-                //type: "simple-marker",
-                // outline: {
-                //     color: [0,0,0,255],
-                //     width: 0.75,
-                // },
-                // size: 8
 
-                type:"picture-marker",
-                //api ref: https://developers.arcgis.com/javascript/latest/api-reference/esri-symbols-PictureMarkerSymbol.html
-                url:"https://image.flaticon.com/icons/png/512/2949/2949701.png",
-                height: "30px"
-            };
+            mymapView = new MapView({
+                center: [-118.24097332504088,34.19092976687072],
+                map: mymap,
+                container: "myviewDiv",
+                zoom: 9
+            });
 
-            const openParkSymbl = {
-                //color: [76,230,0,255],
-                //type: "simple-marker",
-                // outline: {
-                //     color: [0,0,0,255],
-                //     width: 0.75,
-                // },
-                // size:8
-                
-                type:"picture-marker",
-                //api ref: https://developers.arcgis.com/javascript/latest/api-reference/esri-symbols-PictureMarkerSymbol.html
-                url:"https://image.flaticon.com/icons/svg/2965/2965549.svg",
-                height:"30px"
-            };
+            mapLegend = new Legend({
+                view:mymapView
+            });
 
-            var myrenderer = {
-                type: "unique-value",
-                field: "Status",
-                uniqueValueInfos:[{value:"Closed",symbol:closedParkSymbl},
-                                  {value:"Open",symbol:openParkSymbl}]
-            };
+            mapExpand = new Expand({
+                view:mymapView,
+                content:mapLegend,
+                expandTooltip: "Legend"
+            });
+            mymapView.ui.add(mapExpand, "bottom-left");
+            // let covidCases = new EsriFL({
+            //     url:"https://services7.arcgis.com/aFfS9FqkIRSo0Ceu/ArcGIS/rest/services/COVID19_LADPH_Daily_Deaths_LA_County_Cities_Communities/FeatureServer/0",
+            // });
+            // mymap.add(covidCases);
 
-            let parkpopup = {
-                "title": "<h1>{CITY}</h1>",
-                "content": [
-                    {
+            let cdc_svi = new EsriFL({
+                url: "https://services7.arcgis.com/aFfS9FqkIRSo0Ceu/ArcGIS/rest/services/COVID19_Cases_LA_County_Cities_Communities_and_Social_Vulnerability_Index_Relationship/FeatureServer/1",
+                definitionExpression: "Estimated_Population <> null",
+                popupTemplate: {
+                    title:"{Name}",
+                    content:[{
                         type: "fields",
+                        fieldInfos:[
+                            {
+                                fieldName: "Estimated_Population",
+                                label: "Total Population"
+                            },
+                            {
+                                fieldName: "Confirmed_Cases",
+                                label: "Confirmed Cases"
+                            },
+                            {
+                                fieldName: "Confirmed_Deaths",
+                                label: "Confirmed Death"
+                            },
+                            {
+                                fieldName: "Crude_Rate_Per_100000",
+                                label: "Crude Rate (per 100K)"
+                            }
+                        ]
+                    }]
+                }
+            });
+            mymap.add(cdc_svi);
+
+            let testingCtr = new EsriFL({
+                url:"https://services7.arcgis.com/aFfS9FqkIRSo0Ceu/ArcGIS/rest/services/COVID19_Testing_Locations_View_Only/FeatureServer/0",
+                popupTemplate:{
+                    title:"{Name}",
+                    content:[{
+                        type:"fields",
                         fieldInfos:[{
-                            fieldName: "CITY"
+                            fieldName: "Full_Address",
+                            label: "Address"
                         },
                         {
-                            fieldName: "Status"
+                            fieldName: "Hours ",
+                            label: "Hours"
+                        },
+                        {
+                            fieldName:"Testing_Type",
+                            label: "Testing Type"
+                        },
+                        {
+                            fieldName:"Appointment_Type",
+                            label: "Appointment Type"
+                        },
+                        {
+                            fieldName:"For_More_Information",
+                            label:"For More Info"
                         }
                     ]
-                    }
-                ]
-            }
-            var parklyr = new FeatureLayer({
-                url:"https://services7.arcgis.com/aFfS9FqkIRSo0Ceu/ArcGIS/rest/services/City_of_LA_Recreation_and_Parks_View_Only/FeatureServer/0",
-                // renderer: {
-                //     type: "simple",
-                //     symbol:{
-                //         type: "simple-marker",
-                //         style: "triangle",
-                //         color:[255,128,45]
-                //     },
-                // },
-                renderer:myrenderer,
-                popupTemplate:parkpopup
+                    }]
+                }
             });
-            /*mymap.add(mylayer);
-            mymap.add(mylayer2);*/
-            //mymap.add(parklyr);
-            // mymapview.when()
-            //          .then(function(){window.alert("Map View is created")},function(e){window.alert(e)});
-            
-            //Check whether map view can be successfully created,
-            //if yes, add parklyr to mymap through function addLayers(lyr)
-            mymapview.when()
-                     .then(addLayers(parklyr))
-                     .catch(function(e){window.alert("something went wrong!")})
-            
-            function addLayers(lyr){
-                mymap.add(lyr)
-            }
+            mymap.add(testingCtr);
 
-            
+            ////create graphic for mouse point click
+            let pointGraphic = new Graphic({
+                symbol:{
+                    type: "simple-marker", 
+                    color: [255, 255, 0],
+                    outline: {
+                        color:[255,255,255],
+                        width:1.5
+                    }
+                }
+            });
+
+            mymapView.on("click",function(event){
+                //console.log(event)
+                // alert("lon, lat: ["+event.mapPoint.longitude+", "
+                //                 +event.mapPoint.latitude+"]")
+
+                mymapView.graphics.remove(pointGraphic);
+
+                queryFeatures_click(event);
+            });
+
+            function queryFeatures_click(screenPoint){
+                const mypoint = mymapView.toMap(screenPoint);
+
+                //Feature layer has a method queryFeatures(), which executes a Query against the feature service and returns a FeatureSet, 
+                //The returned FeatureSet can be accessed using the .then() method once the promise resolves
+                //A FeatureSet contains an array of Graphic features, which can be displayed in a Graphic layer
+                //two arguments for queryFeatures function:query and option
+                //https://developers.arcgis.com/javascript/latest/api-reference/esri-layers-FeatureLayer.html#queryFeatures
+                // cdc_svi.queryFeatures({
+                //     //query argument
+                //     //spatial query
+                //     geometry: mypoint,
+                //     distance: 1,
+                //     units: "miles",
+                //     spatialRelationship:"intersects",
+                //     outFields: ["*"]
+                // }).then(function(returnedFeatureSet){
+                //     //console.log(typeof returnedFeatureSet.features);
+
+                //     pointGraphic.geometry = mypoint;
+                //     mymapView.graphics.add(pointGraphic);
+                //     // mymapView.popup.open({
+                //     //     location:mypoint,
+                //     //     features: returnedFeatureSet.features,
+                //     //     featureMenuOpen: true
+                //     // });
+
+                //     //highlight the selected polygons
+                    
+                //     //var feature = returnedFeatureSet.features[0];
+                //     mymapView.whenLayerView(cdc_svi).then(function(layerView){
+                //         if (highlightSelected){highlightSelected.remove();}
+                //         highlightSelected = layerView.highlight(returnedFeatureSet.features);
+                //     });
+                // });
+
+                testingCtr.queryFeatures({
+                    geometry:mypoint,
+                    distance:1,
+                    units:"miles",
+                    spatialRelationship:"intersects",
+                    outFields:["*"]
+                }).then(function(returnedFeatureSet){
+                    pointGraphic.geometry = mypoint;
+                    mymapView.graphics.add(pointGraphic);
+                    mymapView.whenLayerView(testingCtr).then(function(layerView){
+                        if (highlightSelected){highlightSelected.remove();}
+                        highlightSelected = layerView.highlight(returnedFeatureSet.features);
+                    });
+                })
+
+            }
         });
     </script>
+</head>
+<body>
+    <div id="myviewDiv"></div>
 </body>
 </html>
